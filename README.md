@@ -1,9 +1,20 @@
 # CNC Detection and Monitoring Dashboard
 
-An on-premises, multi-camera monitoring application for CNC work areas. It
-reads RTSP streams or local video files, detects and tracks people, checks for
-phones in configured work zones, applies per-zone occupancy rules, records
-events and screenshots, and serves a browser-based dashboard.
+## Project description
+
+CNC Detection and Monitoring Dashboard is an on-premises application for
+monitoring people and phone use in CNC work areas. Its goal is to help
+operators and administrators see who is present in configured work zones and
+receive a record when zone occupancy rules are exceeded. The system reads
+camera or NVR RTSP streams, detects and tracks people, checks for phones in
+work zones, and presents live video, zone counts, violation status, and event
+history in a web dashboard.
+
+Administrators can define work zones and set a separate allowed-person limit
+for each zone, including zero. The application records events and supporting
+screenshots so activity can be reviewed. It is intended for on-premises
+monitoring and does not automatically discover cameras or adapt to camera IP
+changes.
 
 The application has two Python/FastAPI services:
 
