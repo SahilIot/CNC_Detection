@@ -534,3 +534,20 @@ Uvicorn supports `--timeout-graceful-shutdown`.
 - The backend serves annotated frames and event images to the frontend; size
   CPU/GPU resources and network capacity for the number and resolution of
   simultaneous camera streams.
+
+## Contributing and repository policies
+
+- [Contributing guidelines](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- [License](LICENSE)
+
+Bug reports and feature requests can be submitted using the GitHub issue
+forms. Pull requests should follow the checklist in the pull request template.
+
+The suggested GitHub repository description is:
+
+> On-premises CNC safety monitoring with YOLO person and phone detection, RTSP/NVR streams, configurable work zones, and a live dashboard.
+
+Set this text in the repository's **About** section on GitHub; it is repository
+metadata and is not controlled by files in this checkout.
