@@ -43,6 +43,7 @@ class StartRequest(BaseModel): # validate incoming JSON (Pydantic)
     multiple_limit_seconds: int = Field(default=120, ge=1)
     absence_limit_seconds: int = Field(default=300, ge=1)
 
+
 class EventDeleteRequest(BaseModel):
     event_ids: list[str] = Field(min_length=1)
 
