@@ -92,7 +92,7 @@
           <tbody>
           {% for machine in machines %}
           {% set zone_count = machine.zone_limits|length or machine.runtime.zones|length or 1 %}
-          {% set allowed_total = (machine.zone_limits.values()|sum) or machine.max_persons %}
+          {% set allowed_total = machine.zone_limits.values()|sum if machine.zone_limits else machine.max_persons %}
           {% set has_violation = machine.runtime.zones|selectattr('violation.active')|list|length > 0 %}
 
           <tr data-machine-id="{{ machine.id }}">
@@ -324,10 +324,10 @@
 
         <div class="zone-limit-entry" id="zone-limit-entry">
           <label>
-            Zone 1 required people
+            Zone 1 maximum allowed people
             <input name="zone_limit_1"
                    type="number"
-                   min="1"
+                   min="0"
                    max="50"
                    value="1"
                    required>
@@ -543,12 +543,12 @@
           zoneEntry.replaceChildren(
             ...Array.from({ length: count }, (_, index) => {
               const label = document.createElement("label");
-              label.textContent = `Zone ${index + 1} required people`;
+              label.textContent = `Zone ${index + 1} maximum allowed people`;
 
               const input = document.createElement("input");
               input.name = `zone_limit_${index + 1}`;
               input.type = "number";
-              input.min = "1";
+              input.min = "0";
               input.max = "50";
               input.value = "1";
               input.required = true;

@@ -162,11 +162,11 @@
         <div class="zone-limits">
           {% for zone in machine.runtime.zones %}
           <label>
-            Zone {{ zone.zone }}
+            Zone {{ zone.zone }} maximum allowed people
             <input
               name="zone_limit_{{ zone.zone }}"
               type="number"
-              min="1"
+              min="0"
               max="50"
               value="{{ machine.zone_limits.get('zone_' ~ zone.zone, machine.max_persons) }}"
               required

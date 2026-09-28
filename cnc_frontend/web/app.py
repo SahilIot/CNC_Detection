@@ -118,7 +118,7 @@ async def add_machine(request: Request, name: str = Form(...),
     zone_limits = {}
     for index in range(1, zone_count + 1):
         try:
-            zone_limits[f"zone_{index}"] = max(1, min(50, int(
+            zone_limits[f"zone_{index}"] = max(0, min(50, int(
                 form.get(f"zone_limit_{index}", max_persons)
             )))
         except (TypeError, ValueError) as exc:
@@ -161,7 +161,7 @@ async def start_monitoring(machine_id: int, request: Request):
         raise HTTPException(400, "Number of zones must be between 1 and 20")
     zone_limits = machine.get("zone_limits", {})
     zone_limits = {
-        f"zone_{index}": max(1, min(50, int(
+        f"zone_{index}": max(0, min(50, int(
             zone_limits.get(f"zone_{index}", machine["max_persons"])
         )))
         for index in range(1, len(zones) + 1)
@@ -223,7 +223,7 @@ async def update_settings( request: Request,
         if key.startswith("zone_limit_"):
             zone_number = key.removeprefix("zone_limit_")
             try:
-                zone_limits[f"zone_{int(zone_number)}"] = max(1, min(50, int(value)))
+                zone_limits[f"zone_{int(zone_number)}"] = max(0, min(50, int(value)))
             except ValueError as exc:
                 raise HTTPException(400, f"Invalid limit for zone {zone_number}") from exc
     if not zone_limits:
