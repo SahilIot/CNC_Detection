@@ -257,6 +257,12 @@ Or activate the root `.venv` first and use
 
 Open <http://127.0.0.1:8000>.
 
+On Windows, the project-root `start_backend.bat` and `start_dashboard.bat`
+launch the services separately. `start_cnc.bat` opens both services in
+separate minimized command windows; leave them running while using the
+dashboard. The dashboard listens on all server interfaces (port `8000`), so
+for LAN use restrict access with Windows Firewall as described below.
+
 The frontend uses `http://127.0.0.1:9000` as its backend by default. If the
 backend runs on another machine, set `CNC_BACKEND_URL` in the frontend
 terminal to that backend's reachable HTTP address before starting Uvicorn:
