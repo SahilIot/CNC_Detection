@@ -1,9 +1,5 @@
 # CNC Detection and Monitoring Dashboard
 
-## Full project documentation
-
-- [Read the full project documentation](docs/PROJECT_DOCUMENTATION.html)
-- [Download the documentation as PDF](docs/PROJECT_DOCUMENTATION.pdf)
 
 ## Project description
 
