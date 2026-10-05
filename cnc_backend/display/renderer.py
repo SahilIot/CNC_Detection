@@ -181,4 +181,4 @@ class Renderer:
                 interpolation=cv2.INTER_AREA,
             )
         return frame
-    #Its job is to take video frame, detect people, work zones, and safety information, then draw everythin on the frame so we can see monitoring results in a OpenCV window
+    #Its job is to take video frame, detect people, work zones, and safety information, then draw everything on the frame so we can see monitoring results in a OpenCV window
