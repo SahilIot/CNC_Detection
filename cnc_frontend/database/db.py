@@ -106,10 +106,7 @@ def delete_machine(machine_id):
         result = conn.execute("DELETE FROM machines WHERE id = ?", (machine_id,))
         return result.rowcount > 0
 
-def update_machine_settings(
-    machine_id, max_persons, multiple_limit_seconds, absence_limit_seconds,
-    zone_limits,
-):
+def update_machine_settings(machine_id, max_persons, multiple_limit_seconds, absence_limit_seconds,zone_limits,):
     with connection() as conn:
         conn.execute(
             """UPDATE machines
