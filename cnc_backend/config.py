@@ -28,6 +28,11 @@ model_path = resolve_path("MODEL_PATH",str(models_dir / "yolo11n.pt"))
 
 phone_model_path = resolve_path("PHONE_MODEL_PATH",str(model_path))
 
+head_pose_model_path = resolve_path(
+    "HEAD_POSE_MODEL_PATH",
+    str(models_dir / "yolo11n-pose.pt"),
+)
+
 def resolve_camera_source(value):
 
     value = value.strip()
@@ -71,15 +76,35 @@ person_confidence = float(os.getenv("PERSON_CONFIDENCE", "0.40"))
 
 phone_confidence = float(os.getenv("PHONE_CONFIDENCE", "0.50"))
 
+head_pose_confidence = float(os.getenv("HEAD_POSE_CONFIDENCE", "0.35"))
+
+head_pose_keypoint_confidence = float(
+    os.getenv("HEAD_POSE_KEYPOINT_CONFIDENCE", "0.25")
+)
+
+head_pose_keypoint_delta = float(
+    os.getenv("HEAD_POSE_KEYPOINT_DELTA", "0.05")
+)
+
 person_image_size = int(os.getenv("PERSON_IMAGE_SIZE", "640"))
 
 phone_image_size = int(os.getenv("PHONE_IMAGE_SIZE", "512"))
+
+head_pose_image_size = int(os.getenv("HEAD_POSE_IMAGE_SIZE", "640"))
 
 person_use_augment = (os.getenv("PERSON_USE_AUGMENT", "false").strip().lower()== "true")
 
 person_detection_interval = 1
 
 phone_detection_interval = int(os.getenv("PHONE_DETECTION_INTERVAL", "3"))
+
+head_pose_detection_interval = int(
+    os.getenv("HEAD_POSE_DETECTION_INTERVAL", "3")
+)
+
+head_down_violation_seconds = float(
+    os.getenv("HEAD_DOWN_VIOLATION_SECONDS", "120")
+)
 
 phone_class_id = int(os.getenv("PHONE_CLASS_ID", "67"))
 
