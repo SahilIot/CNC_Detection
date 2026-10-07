@@ -4,6 +4,7 @@ import cv2 # draws bounding box and annotations for phone event screenshots
 
 from detection.person_detector import PersonDetector 
 from detection.phone_detector import PhoneDetector
+from detection.pose_detector import PoseDetector
 from events.event_manager import EventManager
 from zones.zone_manager import ZoneManager
 from safety.rules import SafetyRules
@@ -12,7 +13,7 @@ from display.renderer import Renderer
 # brain for one camera ,processes one camera
 # takes frames provided by reader.py and performs the processing pipeline
 class CameraWorker(threading.Thread):
-    def __init__(self, camera_id, source, config, device, half, phone_detector, event_manager, zone_manager):
+    def __init__(self, camera_id, source, config, device, half, phone_detector, pose_detector, event_manager, zone_manager):
         super().__init__(daemon=True, name=f"worker-{camera_id}")
         self.camera_id = camera_id
         self.source = source
@@ -20,6 +21,7 @@ class CameraWorker(threading.Thread):
         self.device = device
         self.half = half
         self.phone_detector = phone_detector
+        self.pose_detector = pose_detector
         self.event_manager = event_manager
         self.zone_manager = zone_manager
         self.renderer = Renderer(config.display_width)
@@ -41,6 +43,7 @@ class CameraWorker(threading.Thread):
         self.latest_video_time = 0.0
         self.latest_persons = []
         self.latest_inside = {}
+        self.head_down_states = {}
         self.state_lock = threading.Lock()
         self.fps_counter_start = time.perf_counter()
         self.processed_frames = 0
@@ -189,14 +192,10 @@ class CameraWorker(threading.Thread):
             details = "Phone detected inside work zone"
 
             # Write CSV event
-            timestamp = self.event_manager.log(
-                self.camera_id, video_time, event_type, track_id, details
-            )
+            timestamp = self.event_manager.log(self.camera_id, video_time, event_type, track_id, details)
 
             # Save screenshot
-            self.event_manager.screenshot(
-                self.camera_id,
-                shot,
+            self.event_manager.screenshot(self.camera_id,shot,
                 video_time,
                 event_type,
                 {track_id},
@@ -206,6 +205,20 @@ class CameraWorker(threading.Thread):
             # Prevent repeated phone events for this track
             self.safety.mark_phone(track_id)
             print(f"[{self.camera_id}] PHONE DETECTED | Track {track_id} | Zone {zone + 1} | {video_time:.2f}s")
+
+    def _update_head_down_states(self, frame, persons, frame_number, video_time):
+        if frame_number % max(1, self.config.head_pose_detection_interval) != 0:
+            return
+
+        for person in persons:
+            if person["zone"] is None:
+                self.head_down_states.pop(person["id"], None)
+                continue
+            posture = self.pose_detector.detect_head_down(frame,
+                (person["x1"], person["y1"], person["x2"], person["y2"]),
+            )
+            if posture is not None:
+                self.head_down_states[person["id"]] = (posture,video_time,)
 
     @staticmethod
     def _phone_belongs_to_person(phone_box, person):
@@ -220,12 +233,42 @@ class CameraWorker(threading.Thread):
         try:
             results = self.person_detector.track(frame)
             persons = self._extract_persons(results)
+            self._update_head_down_states(frame, persons, frame_number, video_time)
+            for person in persons:
+                head_down, observed_at = self.head_down_states.get(person["id"], (False, video_time))
+                person["head_down"] = (head_down
+                    and video_time - observed_at
+                    <= self.config.head_pose_hold_seconds
+                )
             persons, inside, events = self.safety.update(persons,video_time,len(self.zones))
 
             for event in events:
+                screenshot_frame = frame
+                if event["event_type"] == "HEAD_DOWN_VIOLATION":
+                    screenshot_frame = ZoneManager.draw(frame.copy(), self.zones)
+                    event_track_ids = event["track_ids"]
+                    for person in persons:
+                        if person["id"] not in event_track_ids:
+                            continue
+                        cv2.rectangle(
+                            screenshot_frame,
+                            (person["x1"], person["y1"]),
+                            (person["x2"], person["y2"]),
+                            (0, 0, 255),
+                            3,
+                        )
+                        cv2.putText(
+                            screenshot_frame,
+                            f"HEAD DOWN VIOLATION | ID {person['id']}",
+                            (person["x1"], max(25, person["y1"] - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            (0, 0, 255),
+                            2,
+                        )
                 self.event_manager.screenshot(
                     self.camera_id,
-                    frame,
+                    screenshot_frame,
                     video_time,
                     event["event_type"],
                     event["track_ids"],

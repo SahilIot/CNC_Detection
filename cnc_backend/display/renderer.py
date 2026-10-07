@@ -59,8 +59,8 @@ class Renderer:
             )
 
             if person.get("locked", False):
-                color = (0, 255, 0)
-                label = (f"PERSON {person_key} | ID {track_id} | {status}")
+                color = (0, 0, 255) if person.get("head_down") else (0, 255, 0)
+                label = f"PERSON {person_key} | ID {track_id} | {status}"
             else:
                 color = ((0, 255, 0)
                     if zone is not None
@@ -68,6 +68,8 @@ class Renderer:
                 )
 
                 label = f"ID {track_id} | {status}"
+            if person.get("head_down"):
+                label += (f" | HEAD DOWN {person.get('head_down_elapsed', 0.0):.0f}s")
             # Bounding box
             cv2.rectangle(frame,
                 (x1, y1),(x2, y2),
@@ -128,15 +130,11 @@ class Renderer:
             # Use the safety engine's authoritative deduplicated count. The
             # display snapshot can be one frame behind during tracker changes.
             count = safety.current_zone_counts[z]
-
             cooldown = safety.cooldown_until.get(z)
-
             if cooldown is not None and video_time < cooldown:
                 remaining = cooldown - video_time
-
                 text = (f"Zone {z + 1}: COOLDOWN {format_timestamp(remaining)}")
                 color = (0, 165, 255)
-
             elif count > safety.allowed_people_per_zone[z] and safety.multiple_start.get(z) is not None:
                 elapsed = video_time - safety.multiple_start[z]
                 

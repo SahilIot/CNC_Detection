@@ -28,6 +28,7 @@ class SafetyRules:
         self.cooldown_seconds = config.multiple_person_cooldown_seconds
 
         self.absence_limit = config.absence_limit_seconds
+        self.head_down_limit = getattr(config, "head_down_violation_seconds", 120.0)
 
         self.track_grace = config.track_grace_seconds
 
@@ -143,12 +144,17 @@ class SafetyRules:
                         "last_zone": zone,
                         "absence_logged": False,
                         "phone_logged": False,
+                        "head_down_start": None,
+                        "head_down_logged": False,
                         "last_box": (
                             person["x1"],person["y1"],
                             person["x2"],person["y2"],
                         ),
                     }
             state = self.track_states[track_id]
+            if current_time - state.get("last_seen", current_time) > self.track_grace:
+                state["head_down_start"] = None
+                state["head_down_logged"] = False
             state["last_seen"] = current_time
             state["last_box"] = (
                 person["x1"],person["y1"],
@@ -158,6 +164,43 @@ class SafetyRules:
                 state["last_inside"] = current_time
                 state["last_zone"] = zone
                 state["absence_logged"] = False
+            state.setdefault("head_down_start", None)
+            state.setdefault("head_down_logged", False)
+            if zone is None or not person.get("head_down", False):
+                state["head_down_start"] = None
+                state["head_down_logged"] = False
+            else:
+                if state["head_down_start"] is None:
+                    state["head_down_start"] = current_time
+                elapsed = current_time - state["head_down_start"]
+                limit = self.head_down_limit
+                if elapsed >= limit and not state["head_down_logged"]:
+                    state["head_down_logged"] = True
+                    details = (
+                        f"Person sustained a head-down posture in zone "
+                        f"{zone + 1} for {elapsed:.1f} seconds "
+                        f"(limit: {limit:.1f} seconds)"
+                    )
+                    timestamp = self.event_manager.log(
+                        self.camera_id,
+                        current_time,
+                        "HEAD_DOWN_VIOLATION",
+                        track_id,
+                        details,
+                    )
+                    events.append({
+                        "timestamp": timestamp,
+                        "event_type": "HEAD_DOWN_VIOLATION",
+                        "track_ids": {track_id},
+                        "details": details,
+                        "zone": zone,
+                    })
+
+        for track_id, state in self.track_states.items():
+            missing_for = current_time - state.get("last_seen", current_time)
+            if track_id not in active_ids and missing_for > self.track_grace:
+                state["head_down_start"] = None
+                state["head_down_logged"] = False
 
         inside = {z: set()
             for z in range(zone_count)

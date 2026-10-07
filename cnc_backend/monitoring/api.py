@@ -22,6 +22,7 @@ from fastapi import HTTPException
 import config
 from camera.worker import CameraWorker
 from detection.phone_detector import PhoneDetector
+from detection.pose_detector import PoseDetector
 from events.event_manager import EventManager
 from zones.zone_manager import ZoneManager
 
@@ -77,6 +78,15 @@ def make_worker(request: StartRequest):
         config.phone_image_size,
         config.phone_class_id,
     )
+    pose_detector = PoseDetector(
+        config.head_pose_model_path,
+        device,
+        half,
+        config.head_pose_confidence,
+        config.head_pose_image_size,
+        config.head_pose_keypoint_confidence,
+        config.head_pose_keypoint_delta,
+    )
     worker_config = SimpleNamespace()
     for name in dir(config):
         if not name.startswith("_"):
@@ -106,6 +116,7 @@ def make_worker(request: StartRequest):
         device,
         half,
         phone_detector,
+        pose_detector,
         events,
         zones,
     )

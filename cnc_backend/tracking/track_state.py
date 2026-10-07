@@ -17,7 +17,7 @@ def calculate_iou(box_a, box_b): # Measure overlap between two bounding box
     
     return inter / union if union > 0 else 0.0
 
-def boxes_are_duplicate(a, b, iou_threshold, center_ratio): #Checks whether two detected people are likely duplicates
+def boxes_are_duplicate(a, b, iou_threshold, center_ratio): # Checks whether two detected people are likely duplicates
     box_a = (a["x1"],a["y1"],a["x2"],a["y2"],)
 
     box_b = (b["x1"],b["y1"],b["x2"],b["y2"],)

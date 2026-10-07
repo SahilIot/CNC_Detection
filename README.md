@@ -133,6 +133,14 @@ Set `MODEL_PATH` to the chosen person model. If `PHONE_MODEL_PATH` is not
 provided, the phone detector uses the same model file. The phone model must
 contain the configured phone class (COCO class ID `67` by default).
 
+Head-down posture detection uses an Ultralytics pose model. Place its weights at
+`cnc_backend\models\yolo11n-pose.pt` or set `HEAD_POSE_MODEL_PATH` to another
+compatible pose model. The default violation delay is two minutes of sustained
+head-down posture within a work zone. Pose estimation uses visible COCO nose,
+eye, and ear keypoints, so camera angle, lighting, and head occlusion affect
+accuracy. The pose model is run on each tracked person's crop rather than the
+full camera frame so the face keypoints have more pixels to work with.
+
 ## Configure the backend
 
 The backend loads the repository-root `.env` first, then
@@ -146,12 +154,20 @@ Common environment variables read by `cnc_backend\config.py`:
 |---|---|---|
 | `MODEL_PATH` | Person-detection YOLO weights | `cnc_backend\models\yolo11n.pt` |
 | `PHONE_MODEL_PATH` | Phone-detection YOLO weights | Value of `MODEL_PATH` |
+| `HEAD_POSE_MODEL_PATH` | Head-pose YOLO pose weights | `cnc_backend\models\yolo11n-pose.pt` |
 | `PERSON_CONFIDENCE` | Minimum person detection confidence | `0.40` |
 | `PHONE_CONFIDENCE` | Minimum phone detection confidence | `0.50` |
+| `HEAD_POSE_CONFIDENCE` | Minimum pose detection confidence | `0.35` |
+| `HEAD_POSE_KEYPOINT_CONFIDENCE` | Minimum confidence for head keypoints | `0.25` |
+| `HEAD_POSE_KEYPOINT_DELTA` | Nose-below-visible-head-landmarks threshold, normalized by person height | `0.05` |
 | `PHONE_DETECTION_INTERVAL` | Run phone detection every N frames | `3` |
+| `HEAD_POSE_DETECTION_INTERVAL` | Run pose detection every N frames | `3` |
+| `HEAD_POSE_HOLD_SECONDS` | Keep the last certain pose result across uncertain keypoint frames | `1.5` |
+| `HEAD_DOWN_VIOLATION_SECONDS` | Sustained head-down delay before recording a violation | `120` |
 | `PHONE_CLASS_ID` | Phone class ID in the phone model | `67` |
 | `PERSON_IMAGE_SIZE` | Person model inference image size | `640` |
 | `PHONE_IMAGE_SIZE` | Phone model inference image size | `512` |
+| `HEAD_POSE_IMAGE_SIZE` | Pose model inference image size | `640` |
 | `PERSON_USE_AUGMENT` | Enable person model inference augmentation (`true`/`false`) | `false` |
 | `PERSON_TRACKER_CONFIG` | Ultralytics tracker YAML or path | `botsort.yaml` |
 | `TRACK_GRACE_SECONDS` | Track matching grace period | `1.5` |
@@ -169,10 +185,12 @@ your camera/NVR administrator):
 ```dotenv
 MODEL_PATH=models/yolo11n.pt
 PHONE_MODEL_PATH=models/yolo11n.pt
+HEAD_POSE_MODEL_PATH=models/yolo11n-pose.pt
 CAMERA_01=rtsp://<user>:<password>@<nvr-address>:554/<vendor-channel-path>
 PERSON_CONFIDENCE=0.40
 PHONE_CONFIDENCE=0.50
 PHONE_DETECTION_INTERVAL=3
+HEAD_POSE_DETECTION_INTERVAL=3
 PHONE_CLASS_ID=67
 PERSON_IMAGE_SIZE=640
 PHONE_IMAGE_SIZE=512
@@ -390,6 +408,11 @@ violation clears (about 09:05).
   does not itself activate the over-limit violation.
 - Phone detection runs on person crops at the configured frame interval.
   A phone detected inside a work zone creates a `PHONE_DETECTED` event.
+- Head-down posture is estimated from pose keypoints inside work zones. If the
+  posture remains detected for `HEAD_DOWN_VIOLATION_SECONDS` (120 seconds by
+  default), one `HEAD_DOWN_VIOLATION` event is added to that camera's
+  `events.csv` and an annotated screenshot is saved. The timer resets when the
+  posture is no longer detected or the person leaves the zone.
 - Violation and phone/absence event screenshots are saved with the event
   data. A violation interval is recorded when the over-limit condition
   clears; the dashboard can show the active violation's start time while it
@@ -406,7 +429,7 @@ Persistent data is stored in different places:
 | Machine names, RTSP URLs, occupancy settings, and camera credentials | `cnc_frontend\database\cnc.sqlite3` |
 | Saved normalized zone polygons | `cnc_backend\data\outputs\camera_zones\` |
 | Event CSV files and screenshots | `cnc_backend\data\outputs\cameras\<camera_id>\` |
-| Model weights | `cnc_backend\models\` or the configured `MODEL_PATH` |
+| Model weights | `cnc_backend\models\` or the configured `MODEL_PATH`, `PHONE_MODEL_PATH`, and `HEAD_POSE_MODEL_PATH` |
 
 Each camera's event history is stored in an `events.csv` file and screenshots
 in its `screenshots` directory. Events include a wall-clock timestamp,
@@ -501,8 +524,8 @@ host.
 - Draw and save the configured number of zones using the dashboard zone
   editor.
 - Check that saved zone count matches the configured zone count.
-- Confirm model weights exist at `MODEL_PATH` and are compatible with
-  Ultralytics.
+- Confirm model weights exist at `MODEL_PATH` and
+  `HEAD_POSE_MODEL_PATH` and are compatible with Ultralytics.
 - Check the backend logs for camera, model, or phone-class configuration
   errors.
 
