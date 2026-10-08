@@ -3,6 +3,7 @@ import csv
 import cv2
 from datetime import datetime
 import hashlib
+import time
 
 def format_timestamp(seconds):
     seconds = max(0.0, float(seconds))
@@ -74,6 +75,18 @@ class EventManager:
 
         print(f"SCREENSHOT SAVED: {path}")
         return path
+
+    def cleanup_old_screenshots(self, retention_days=15, now=None):
+        cutoff = (time.time() if now is None else now) - retention_days * 86400
+        deleted = 0
+        for screenshot_dir in self.base.glob("*/screenshots"):
+            if not screenshot_dir.is_dir():
+                continue
+            for screenshot in screenshot_dir.glob("*.jpg"):
+                if screenshot.stat().st_mtime < cutoff:
+                    screenshot.unlink()
+                    deleted += 1
+        return deleted
 
     @staticmethod
     def _event_id(camera_id, row_number, row):

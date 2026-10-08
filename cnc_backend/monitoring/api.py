@@ -1,5 +1,6 @@
 import copy # copies conf. values
 import asyncio # Handles async streaming
+import logging
 import shutil # Delete camera directories
 import threading # Protects shared worker state
 import time 
@@ -27,9 +28,12 @@ from events.event_manager import EventManager
 from zones.zone_manager import ZoneManager
 
 app = FastAPI(title="CNC Detection API")
+logger = logging.getLogger(__name__)
 workers: dict[str, CameraWorker] = {}
 workers_lock = threading.Lock()
 camera_start_locks: dict[str, threading.Lock] = {}
+screenshot_cleanup_stop = threading.Event()
+screenshot_cleanup_thread = None
 events = EventManager(config.outputs_dir)
 zones = ZoneManager(config.outputs_dir, config.zone_margin_px)
 app.mount("/outputs", StaticFiles(directory=config.outputs_dir), name="outputs")  # Security consideration only for trusted local network
@@ -51,8 +55,35 @@ class EventDeleteRequest(BaseModel):
 class ZoneSaveRequest(BaseModel):
     zones: list[list[list[float]]] = Field(min_length=1, max_length=20)
 
+def cleanup_old_screenshots():
+    deleted = events.cleanup_old_screenshots(retention_days=15)
+    if deleted:
+        logger.info("Deleted %d screenshots older than 15 days", deleted)
+
+def run_screenshot_cleanup():
+    while not screenshot_cleanup_stop.wait(24 * 60 * 60):
+        try:
+            cleanup_old_screenshots()
+        except OSError:
+            logger.exception("Could not complete scheduled screenshot cleanup")
+
+@app.on_event("startup")
+def start_screenshot_cleanup():
+    global screenshot_cleanup_thread
+    cleanup_old_screenshots()
+    screenshot_cleanup_stop.clear()
+    screenshot_cleanup_thread = threading.Thread(
+        target=run_screenshot_cleanup,
+        name="screenshot-cleanup",
+        daemon=True,
+    )
+    screenshot_cleanup_thread.start()
+
 @app.on_event("shutdown") 
 def shutdown_workers():
+    screenshot_cleanup_stop.set()
+    if screenshot_cleanup_thread is not None:
+        screenshot_cleanup_thread.join(timeout=5)
     with workers_lock:
         active_workers = list(workers.values())
     for worker in active_workers:

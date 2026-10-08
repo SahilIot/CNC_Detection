@@ -453,6 +453,9 @@ Each camera's event history is stored in an `events.csv` file and screenshots
 in its `screenshots` directory. Events include a wall-clock timestamp,
 video-relative time, event type, track IDs, and details. The dashboard supports
 opening screenshots and deleting individual or selected events.
+The detection backend automatically deletes screenshot files more than 15 days
+old at startup and once per day while running. Event CSV history is retained;
+events whose screenshots have expired remain available without an image.
 
 The frontend SQLite database and backend output directory are runtime data;
 back them up before replacing or reinstalling the project. The Git ignore
