@@ -25,7 +25,9 @@ def resolve_path(value, default):
     return project_root / path
 
 model_path = resolve_path("MODEL_PATH",str(models_dir / "yolo11n.pt"))
-phone_model_path = resolve_path("PHONE_MODEL_PATH",str(model_path))
+phone_model_path = resolve_path("PHONE_MODEL_PATH",
+    str(models_dir / "yolo12n.pt"),
+)
 
 head_pose_model_path = resolve_path("HEAD_POSE_MODEL_PATH",
     str(models_dir / "yolo11n-pose.pt"),

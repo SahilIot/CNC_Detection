@@ -129,9 +129,10 @@ Place the model weights on the server, for example:
 cnc_backend\models\yolo11n.pt
 ```
 
-Set `MODEL_PATH` to the chosen person model. If `PHONE_MODEL_PATH` is not
-provided, the phone detector uses the same model file. The phone model must
-contain the configured phone class (COCO class ID `67` by default).
+Set `MODEL_PATH` to the chosen person model. By default, phone detection uses
+the separate YOLOv12 nano model at `cnc_backend\models\yolo12n.pt`; set
+`PHONE_MODEL_PATH` to use different weights. The phone model must contain the
+configured phone class (COCO class ID `67` by default).
 
 Head-down posture detection uses an Ultralytics pose model. Place its weights at
 `cnc_backend\models\yolo11n-pose.pt` or set `HEAD_POSE_MODEL_PATH` to another
@@ -154,7 +155,7 @@ Common environment variables read by `cnc_backend\config.py`:
 | Variable | Purpose | Default |
 |---|---|---|
 | `MODEL_PATH` | Person-detection YOLO weights | `cnc_backend\models\yolo11n.pt` |
-| `PHONE_MODEL_PATH` | Phone-detection YOLO weights | Value of `MODEL_PATH` |
+| `PHONE_MODEL_PATH` | Phone-detection YOLO weights | `cnc_backend\models\yolo12n.pt` |
 | `HEAD_POSE_MODEL_PATH` | Head-pose YOLO pose weights | `cnc_backend\models\yolo11n-pose.pt` |
 | `PERSON_CONFIDENCE` | Minimum person detection confidence | `0.40` |
 | `PHONE_CONFIDENCE` | Minimum phone detection confidence | `0.50` |
@@ -183,7 +184,7 @@ your camera/NVR administrator):
 
 ```dotenv
 MODEL_PATH=models/yolo11n.pt
-PHONE_MODEL_PATH=models/yolo11n.pt
+PHONE_MODEL_PATH=models/yolo12n.pt
 HEAD_POSE_MODEL_PATH=models/yolo11n-pose.pt
 CAMERA_01=rtsp://<user>:<password>@<nvr-address>:554/<vendor-channel-path>
 PERSON_CONFIDENCE=0.40
@@ -195,10 +196,11 @@ DETECTION_IMAGE_SIZE=960
 PHONE_IMAGE_SIZE=512
 ```
 
-`DETECTION_IMAGE_SIZE` controls the full-frame pose detector that supplies both
-person boxes and pose keypoints. It defaults to 960 to retain detail for smaller
-people without the cost of 1280 inference. Phone detection runs less expensively
-on person crops at `PHONE_IMAGE_SIZE` 512. The older `HEAD_POSE_IMAGE_SIZE` and
+`DETECTION_IMAGE_SIZE` controls the full-frame YOLO11 pose detector that
+supplies both person boxes and pose keypoints. It defaults to 960 to retain
+detail for smaller people without the cost of 1280 inference. Phone detection
+uses separate YOLOv12 nano weights and runs on person crops at
+`PHONE_IMAGE_SIZE` 512. The older `HEAD_POSE_IMAGE_SIZE` and
 `PERSON_IMAGE_SIZE` variables are accepted as fallbacks when
 `DETECTION_IMAGE_SIZE` is not set. The camera stream itself is still read at
 native resolution; choose a camera/NVR main-stream URL if the source needs more
