@@ -28,7 +28,7 @@ class SafetyRules:
         self.cooldown_seconds = config.multiple_person_cooldown_seconds
 
         self.absence_limit = config.absence_limit_seconds
-        self.head_down_limit = getattr(config, "head_down_violation_seconds", 120.0)
+        self.head_down_limit = getattr(config, "head_down_violation_seconds", 300.0)
 
         self.track_grace = config.track_grace_seconds
 
@@ -143,7 +143,6 @@ class SafetyRules:
                         ),
                         "last_zone": zone,
                         "absence_logged": False,
-                        "phone_logged": False,
                         "head_down_start": None,
                         "head_down_logged": False,
                         "last_box": (
@@ -160,13 +159,21 @@ class SafetyRules:
                 person["x1"],person["y1"],
                 person["x2"],person["y2"],
             )
+            state["pose_keypoints"] = person.get("pose_keypoints")
+            state["head_down"] = person.get("head_down", False)
+            state["phone_detected"] = person.get("phone_detected", False)
+            state["phone_boxes"] = person.get("phone_boxes", [])
             if zone is not None:
                 state["last_inside"] = current_time
                 state["last_zone"] = zone
                 state["absence_logged"] = False
             state.setdefault("head_down_start", None)
             state.setdefault("head_down_logged", False)
-            if zone is None or not person.get("head_down", False):
+            if (
+                zone is None
+                or not person.get("head_down", False)
+                or not person.get("phone_detected", False)
+            ):
                 state["head_down_start"] = None
                 state["head_down_logged"] = False
             else:
@@ -177,24 +184,29 @@ class SafetyRules:
                 if elapsed >= limit and not state["head_down_logged"]:
                     state["head_down_logged"] = True
                     details = (
-                        f"Person sustained a head-down posture in zone "
-                        f"{zone + 1} for {elapsed:.1f} seconds "
+                        f"Phone detected while person sustained a head-down "
+                        f"posture in zone {zone + 1} for {elapsed:.1f} seconds "
                         f"(limit: {limit:.1f} seconds)"
                     )
                     timestamp = self.event_manager.log(
                         self.camera_id,
                         current_time,
-                        "HEAD_DOWN_VIOLATION",
+                        "HEAD_DOWN_PHONE_VIOLATION",
                         track_id,
                         details,
                     )
                     events.append({
                         "timestamp": timestamp,
-                        "event_type": "HEAD_DOWN_VIOLATION",
+                        "event_type": "HEAD_DOWN_PHONE_VIOLATION",
                         "track_ids": {track_id},
                         "details": details,
                         "zone": zone,
                     })
+            state["head_down_elapsed"] = (
+                current_time - state["head_down_start"]
+                if state["head_down_start"] is not None
+                else 0.0
+            )
 
         for track_id, state in self.track_states.items():
             missing_for = current_time - state.get("last_seen", current_time)
@@ -448,14 +460,10 @@ class SafetyRules:
             for lock in locks:
                 if not lock["inside"]:
                     continue
-                # Safety state stays PRESENT even while YOLO is
-                # momentarily missing this person (see the "continue"
-                # in update() for matched is None). But we don't want
-                # to keep drawing a box that hasn't been refreshed in
-                # a while, so this is a display-only cutoff -- it does
-                # NOT touch lock["inside"] or start the away timer.
+                # Keep occupancy grace independent from visualization:
+                # only draw the box when detection refreshed it this frame.
                 stale_for = current_time - lock.get("last_seen", current_time)
-                if stale_for > self.inside_grace:
+                if stale_for > 0:
                     continue
                 x1, y1, x2, y2 = lock["box"]
                 display_persons.append({"id": lock["track_id"],
@@ -465,6 +473,21 @@ class SafetyRules:
                     "zone": zone,
                     "confidence": 1.0,
                     "locked": True,
+                    "pose_keypoints": self.track_states.get(
+                        lock["track_id"], {}
+                    ).get("pose_keypoints"),
+                    "head_down": self.track_states.get(
+                        lock["track_id"], {}
+                    ).get("head_down", False),
+                    "phone_detected": self.track_states.get(
+                        lock["track_id"], {}
+                    ).get("phone_detected", False),
+                    "phone_boxes": self.track_states.get(
+                        lock["track_id"], {}
+                    ).get("phone_boxes", []),
+                    "head_down_elapsed": self.track_states.get(
+                        lock["track_id"], {}
+                    ).get("head_down_elapsed", 0.0),
                 })
 
         return display_persons
@@ -476,15 +499,6 @@ class SafetyRules:
             f"{int((seconds % 3600) // 60):02d}:"
             f"{int(seconds % 60):02d}"
         )
-
-    def phone_allowed(self, track_id):
-        return not (self.track_states
-            .get(track_id, {})
-            .get("phone_logged", False)
-        )
-    def mark_phone(self, track_id):
-        if track_id in self.track_states:
-            self.track_states[track_id]["phone_logged"] = True
 
     def reset_zones(self, zone_count):
         self.multiple_start = {i: None

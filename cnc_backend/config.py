@@ -27,8 +27,7 @@ def resolve_path(value, default):
 model_path = resolve_path("MODEL_PATH",str(models_dir / "yolo11n.pt"))
 phone_model_path = resolve_path("PHONE_MODEL_PATH",str(model_path))
 
-head_pose_model_path = resolve_path(
-    "HEAD_POSE_MODEL_PATH",
+head_pose_model_path = resolve_path("HEAD_POSE_MODEL_PATH",
     str(models_dir / "yolo11n-pose.pt"),
 )
 
@@ -71,19 +70,19 @@ phone_confidence = float(os.getenv("PHONE_CONFIDENCE", "0.50"))
 
 head_pose_confidence = float(os.getenv("HEAD_POSE_CONFIDENCE", "0.35"))
 
-head_pose_keypoint_confidence = float(
-    os.getenv("HEAD_POSE_KEYPOINT_CONFIDENCE", "0.25")
+head_pose_keypoint_confidence = float(os.getenv("HEAD_POSE_KEYPOINT_CONFIDENCE", "0.25"))
+
+head_pose_keypoint_delta = float(os.getenv("HEAD_POSE_KEYPOINT_DELTA", "0.05"))
+
+detection_image_size = int(os.getenv("DETECTION_IMAGE_SIZE",
+        os.getenv("HEAD_POSE_IMAGE_SIZE",
+            os.getenv("PERSON_IMAGE_SIZE", "960"),
+        ),
+    )
 )
-
-head_pose_keypoint_delta = float(
-    os.getenv("HEAD_POSE_KEYPOINT_DELTA", "0.05")
-)
-
-person_image_size = int(os.getenv("PERSON_IMAGE_SIZE", "640"))
-
+person_image_size = detection_image_size
 phone_image_size = int(os.getenv("PHONE_IMAGE_SIZE", "512"))
-
-head_pose_image_size = int(os.getenv("HEAD_POSE_IMAGE_SIZE", "640"))
+head_pose_image_size = detection_image_size
 
 person_use_augment = (os.getenv("PERSON_USE_AUGMENT", "false").strip().lower()== "true")
 
@@ -91,21 +90,13 @@ person_detection_interval = 1
 
 phone_detection_interval = int(os.getenv("PHONE_DETECTION_INTERVAL", "3"))
 
-head_pose_detection_interval = int(
-    os.getenv("HEAD_POSE_DETECTION_INTERVAL", "3")
-)
+head_pose_hold_seconds = float(os.getenv("HEAD_POSE_HOLD_SECONDS", "1.5"))
 
-head_pose_hold_seconds = float(
-    os.getenv("HEAD_POSE_HOLD_SECONDS", "1.5")
-)
-
-head_down_violation_seconds = float(
-    os.getenv("HEAD_DOWN_VIOLATION_SECONDS", "120")
-)
+head_down_violation_seconds = float(os.getenv("HEAD_DOWN_VIOLATION_SECONDS", "120"))
 
 phone_class_id = int(os.getenv("PHONE_CLASS_ID", "67"))
 
-person_tracker_config = os.getenv("PERSON_TRACKER_CONFIG","botsort.yaml")
+person_tracker_config = os.getenv("PERSON_TRACKER_CONFIG","bytetrack.yaml")
 
 _tracker_path = Path(person_tracker_config)
 

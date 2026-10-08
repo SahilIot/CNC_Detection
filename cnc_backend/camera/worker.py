@@ -1,8 +1,7 @@
 import threading # Allows each camers worker to run independently
 import time # Measures processing FPS and add small waits
-import cv2 # draws bounding box and annotations for phone event screenshots
+import cv2 # draws bounding boxes and event annotations
 
-from detection.person_detector import PersonDetector 
 from detection.phone_detector import PhoneDetector
 from detection.pose_detector import PoseDetector
 from events.event_manager import EventManager
@@ -26,11 +25,6 @@ class CameraWorker(threading.Thread):
         self.zone_manager = zone_manager
         self.renderer = Renderer(config.display_width)
         self.reader = None
-        self.person_detector = PersonDetector(
-            config.person_model_path, device, half,
-            config.person_confidence, config.person_image_size,
-            config.person_use_augment,config.person_tracker_config,
-        )
         self.zones = None
         self.zone_masks = None
         self.width = 0
@@ -44,6 +38,8 @@ class CameraWorker(threading.Thread):
         self.latest_persons = []
         self.latest_inside = {}
         self.head_down_states = {}
+        self.phone_states = {}
+        self.processed_sequence = 0
         self.state_lock = threading.Lock()
         self.fps_counter_start = time.perf_counter()
         self.processed_frames = 0
@@ -83,10 +79,11 @@ class CameraWorker(threading.Thread):
         return True
 
     def get_display(self):
-        frame, frame_number, video_time = self.reader.get_latest()
-        if frame is None:
-            return None
         with self.state_lock:
+            if self.latest_raw is None:
+                return None
+            frame = self.latest_raw.copy()
+            video_time = self.latest_video_time
             persons = [p.copy() for p in self.latest_persons]
             inside = {k: set(v) for k, v in self.latest_inside.items()}
             processing_fps = self.processing_fps
@@ -105,16 +102,24 @@ class CameraWorker(threading.Thread):
             self.zone_masks = self.zone_manager.masks(zones, self.width, self.height)
             self.safety.reset_zones(len(zones))
 
-    def _extract_persons(self, results):
+    def _extract_persons(self, results, video_time):
         persons = []
         if not results or len(results) == 0:
             return persons
-        boxes = results[0].boxes
-        if boxes is None or len(boxes) == 0:
+        result = results[0]
+        boxes = result.boxes
+        keypoints = result.keypoints
+        if boxes is None or len(boxes) == 0 or keypoints is None:
             return persons
         xyxy = boxes.xyxy.cpu().numpy()
         ids = boxes.id.int().cpu().tolist() if boxes.id is not None else [None] * len(xyxy)
         confs = boxes.conf.cpu().numpy().tolist() if boxes.conf is not None else [0.0] * len(xyxy)
+        pose_points = keypoints.xy.cpu().numpy()
+        pose_confidences = (
+            keypoints.conf.cpu().numpy()
+            if keypoints.conf is not None
+            else None
+        )
         for index, (box, track_id, confidence) in enumerate(zip(xyxy, ids, confs)):
             # Track IDs can be absent briefly while BoT-SORT initializes.
             # Negative temporary IDs let SafetyRules retain the detection and
@@ -122,103 +127,103 @@ class CameraWorker(threading.Thread):
             if track_id is None:
                 track_id = -(index + 1)
             x1, y1, x2, y2 = map(int, box)
+            point_confidences = (
+                pose_confidences[index]
+                if pose_confidences is not None
+                else [0.0] * len(pose_points[index])
+            )
+            pose_keypoints = [
+                (float(point[0]), float(point[1]), float(point_confidence))
+                for point, point_confidence in zip(
+                    pose_points[index], point_confidences
+                )
+            ]
+            head_down = self.pose_detector.head_down_from_keypoints(
+                pose_points[index],
+                point_confidences,
+                y2 - y1,
+                self.config.head_pose_keypoint_confidence,
+                self.config.head_pose_keypoint_delta,
+            )
+            if head_down is not None:
+                self.head_down_states[track_id] = (head_down, video_time)
+            last_head_down, observed_at = self.head_down_states.get(
+                track_id, (False, video_time)
+            )
             persons.append({
                 "id": int(track_id),
                 "x1": x1,"y1": y1,
                 "x2": x2,"y2": y2,
                 "zone": self.zone_manager.person_zone(self.zone_masks, x1, y1, x2, y2),
                 "confidence": float(confidence),
+                "head_down": (
+                    last_head_down
+                    and video_time - observed_at
+                    <= self.config.head_pose_hold_seconds
+                ),
+                "pose_keypoints": pose_keypoints,
             })
+        active_ids = {person["id"] for person in persons}
+        for track_id, (_, observed_at) in list(self.head_down_states.items()):
+            if (
+                track_id not in active_ids
+                and video_time - observed_at > self.config.track_grace_seconds
+            ):
+                self.head_down_states.pop(track_id, None)
         return persons
 
     def _check_phones(self, frame, persons, video_time, frame_number):
-        if frame_number % self.config.phone_detection_interval != 0:
-            return
+        self.processed_sequence += 1
+        detection_interval = max(1, self.config.phone_detection_interval)
+        should_detect = (
+            (self.processed_sequence - 1) % detection_interval == 0
+        )
+        active_ids = set()
 
         for person in persons:
             track_id = person["id"]
             zone = person["zone"]
+            active_ids.add(track_id)
             if zone is None:
+                self.phone_states.pop(track_id, None)
+                person["phone_boxes"] = []
+                person["phone_detected"] = False
                 continue
 
-            if not self.safety.phone_allowed(track_id):
-                continue
-
-            boxes = self.phone_detector.detect_in_person(frame,
-                person["x1"],person["y1"],
-                person["x2"], person["y2"]
-            )
-            boxes = [
-                box for box in boxes
-                if self._phone_belongs_to_person(box, person)
-            ]
-            if not boxes:
-                continue
-
-            # Create screenshot frame with annotations
-            shot = ZoneManager.draw(frame.copy(),self.zones)
-
-            # Person bounding box
-            cv2.rectangle(shot,
-                (person["x1"], person["y1"]),(person["x2"], person["y2"]),
-                (0, 255, 0),
-                2)
-
-            cv2.putText(shot,
-                f"ID {track_id} | ZONE {zone + 1}",
-                (person["x1"], max(25, person["y1"] - 8)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 0),
-                2
-            )
-            # Phone bounding boxes
-            for box in boxes:
-                cv2.rectangle(shot,
-                    (box["x1"], box["y1"]),(box["x2"], box["y2"]),
-                    (0, 0, 255),
-                    3
+            if should_detect:
+                boxes = self.phone_detector.detect_in_person(
+                    frame,
+                    person["x1"],
+                    person["y1"],
+                    person["x2"],
+                    person["y2"],
+                )
+                boxes = [
+                    box for box in boxes
+                    if self._phone_belongs_to_person(box, person)
+                ]
+                self.phone_states[track_id] = (
+                    boxes,
+                    self.processed_sequence,
+                    video_time,
                 )
 
-                cv2.putText(shot,
-                    f"PHONE {box['confidence']:.2f}",
-                    (box["x1"], max(25, box["y1"] - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,(0, 0, 255),
-                    2)
-
-            # Event information
-            event_type = "PHONE_DETECTED"
-            details = "Phone detected inside work zone"
-
-            # Write CSV event
-            timestamp = self.event_manager.log(self.camera_id, video_time, event_type, track_id, details)
-
-            # Save screenshot
-            self.event_manager.screenshot(self.camera_id,shot,
-                video_time,
-                event_type,
-                {track_id},
-                zone,
-                timestamp=timestamp,
+            boxes, checked_sequence, _ = self.phone_states.get(
+                track_id, ([], -1, video_time)
             )
-            # Prevent repeated phone events for this track
-            self.safety.mark_phone(track_id)
-            print(f"[{self.camera_id}] PHONE DETECTED | Track {track_id} | Zone {zone + 1} | {video_time:.2f}s")
-
-    def _update_head_down_states(self, frame, persons, frame_number, video_time):
-        if frame_number % max(1, self.config.head_pose_detection_interval) != 0:
-            return
-
-        for person in persons:
-            if person["zone"] is None:
-                self.head_down_states.pop(person["id"], None)
-                continue
-            posture = self.pose_detector.detect_head_down(frame,
-                (person["x1"], person["y1"], person["x2"], person["y2"]),
+            person["phone_boxes"] = boxes
+            person["phone_detected"] = (
+                bool(boxes)
+                and self.processed_sequence - checked_sequence
+                < detection_interval
             )
-            if posture is not None:
-                self.head_down_states[person["id"]] = (posture,video_time,)
+
+        for track_id, (_, _, checked_at) in list(self.phone_states.items()):
+            if (
+                track_id not in active_ids
+                and video_time - checked_at > self.config.track_grace_seconds
+            ):
+                self.phone_states.pop(track_id, None)
 
     @staticmethod
     def _phone_belongs_to_person(phone_box, person):
@@ -231,20 +236,18 @@ class CameraWorker(threading.Thread):
 
     def _process_one(self, frame, frame_number, video_time):
         try:
-            results = self.person_detector.track(frame)
-            persons = self._extract_persons(results)
-            self._update_head_down_states(frame, persons, frame_number, video_time)
-            for person in persons:
-                head_down, observed_at = self.head_down_states.get(person["id"], (False, video_time))
-                person["head_down"] = (head_down
-                    and video_time - observed_at
-                    <= self.config.head_pose_hold_seconds
-                )
+            results = self.pose_detector.track(
+                frame,
+                self.config.person_tracker_config,
+                self.config.person_use_augment,
+            )
+            persons = self._extract_persons(results, video_time)
+            self._check_phones(frame, persons, video_time, frame_number)
             persons, inside, events = self.safety.update(persons,video_time,len(self.zones))
 
             for event in events:
                 screenshot_frame = frame
-                if event["event_type"] == "HEAD_DOWN_VIOLATION":
+                if event["event_type"] == "HEAD_DOWN_PHONE_VIOLATION":
                     screenshot_frame = ZoneManager.draw(frame.copy(), self.zones)
                     event_track_ids = event["track_ids"]
                     for person in persons:
@@ -259,13 +262,26 @@ class CameraWorker(threading.Thread):
                         )
                         cv2.putText(
                             screenshot_frame,
-                            f"HEAD DOWN VIOLATION | ID {person['id']}",
+                            f"HEAD DOWN + PHONE VIOLATION | ID {person['id']}",
                             (person["x1"], max(25, person["y1"] - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.6,
                             (0, 0, 255),
                             2,
                         )
+                        Renderer.draw_pose(
+                            screenshot_frame,
+                            person.get("pose_keypoints"),
+                            self.config.head_pose_keypoint_confidence,
+                        )
+                        for phone_box in person.get("phone_boxes", []):
+                            cv2.rectangle(
+                                screenshot_frame,
+                                (phone_box["x1"], phone_box["y1"]),
+                                (phone_box["x2"], phone_box["y2"]),
+                                (0, 0, 255),
+                                2,
+                            )
                 self.event_manager.screenshot(
                     self.camera_id,
                     screenshot_frame,
@@ -275,7 +291,6 @@ class CameraWorker(threading.Thread):
                     event.get("zone"),
                     timestamp=event.get("timestamp"),
                 )
-            self._check_phones(frame,persons,video_time,frame_number)
             display_persons = self.safety.get_display_persons(video_time)
 
             with self.state_lock:

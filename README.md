@@ -135,11 +135,12 @@ contain the configured phone class (COCO class ID `67` by default).
 
 Head-down posture detection uses an Ultralytics pose model. Place its weights at
 `cnc_backend\models\yolo11n-pose.pt` or set `HEAD_POSE_MODEL_PATH` to another
-compatible pose model. The default violation delay is two minutes of sustained
-head-down posture within a work zone. Pose estimation uses visible COCO nose,
-eye, and ear keypoints, so camera angle, lighting, and head occlusion affect
-accuracy. The pose model is run on each tracked person's crop rather than the
-full camera frame so the face keypoints have more pixels to work with.
+compatible pose model. The default violation delay is five minutes with both a
+phone detected and sustained head-down posture within a work zone. Pose
+estimation uses visible COCO nose, eye, ear, shoulder, and hip keypoints, so
+camera angle, lighting, and keypoint occlusion affect accuracy. The pose model
+runs once per processed frame and provides the person
+boxes, persistent tracker IDs, and keypoints together.
 
 ## Configure the backend
 
@@ -158,18 +159,16 @@ Common environment variables read by `cnc_backend\config.py`:
 | `PERSON_CONFIDENCE` | Minimum person detection confidence | `0.40` |
 | `PHONE_CONFIDENCE` | Minimum phone detection confidence | `0.50` |
 | `HEAD_POSE_CONFIDENCE` | Minimum pose detection confidence | `0.35` |
-| `HEAD_POSE_KEYPOINT_CONFIDENCE` | Minimum confidence for head keypoints | `0.25` |
-| `HEAD_POSE_KEYPOINT_DELTA` | Nose-below-visible-head-landmarks threshold, normalized by person height | `0.05` |
+| `HEAD_POSE_KEYPOINT_CONFIDENCE` | Minimum confidence for head and torso keypoints | `0.25` |
+| `HEAD_POSE_KEYPOINT_DELTA` | Nose drop along the torso axis threshold, normalized by person height | `0.05` |
 | `PHONE_DETECTION_INTERVAL` | Run phone detection every N frames | `3` |
-| `HEAD_POSE_DETECTION_INTERVAL` | Run pose detection every N frames | `3` |
 | `HEAD_POSE_HOLD_SECONDS` | Keep the last certain pose result across uncertain keypoint frames | `1.5` |
-| `HEAD_DOWN_VIOLATION_SECONDS` | Sustained head-down delay before recording a violation | `120` |
+| `HEAD_DOWN_VIOLATION_SECONDS` | Sustained phone-and-head-down delay before recording a violation | `300` |
 | `PHONE_CLASS_ID` | Phone class ID in the phone model | `67` |
-| `PERSON_IMAGE_SIZE` | Person model inference image size | `640` |
-| `PHONE_IMAGE_SIZE` | Phone model inference image size | `512` |
-| `HEAD_POSE_IMAGE_SIZE` | Pose model inference image size | `640` |
+| `DETECTION_IMAGE_SIZE` | Full-frame YOLO pose/person detection and tracking image size | `960` |
+| `PHONE_IMAGE_SIZE` | Phone model image size for person-crop detection | `512` |
 | `PERSON_USE_AUGMENT` | Enable person model inference augmentation (`true`/`false`) | `false` |
-| `PERSON_TRACKER_CONFIG` | Ultralytics tracker YAML or path | `botsort.yaml` |
+| `PERSON_TRACKER_CONFIG` | Ultralytics tracker YAML or path | `bytetrack.yaml` |
 | `TRACK_GRACE_SECONDS` | Track matching grace period | `1.5` |
 | `INSIDE_GRACE_SECONDS` | Keep a briefly missed person counted | `2.5` |
 
@@ -192,9 +191,18 @@ PHONE_CONFIDENCE=0.50
 PHONE_DETECTION_INTERVAL=3
 HEAD_POSE_DETECTION_INTERVAL=3
 PHONE_CLASS_ID=67
-PERSON_IMAGE_SIZE=640
+DETECTION_IMAGE_SIZE=960
 PHONE_IMAGE_SIZE=512
 ```
+
+`DETECTION_IMAGE_SIZE` controls the full-frame pose detector that supplies both
+person boxes and pose keypoints. It defaults to 960 to retain detail for smaller
+people without the cost of 1280 inference. Phone detection runs less expensively
+on person crops at `PHONE_IMAGE_SIZE` 512. The older `HEAD_POSE_IMAGE_SIZE` and
+`PERSON_IMAGE_SIZE` variables are accepted as fallbacks when
+`DETECTION_IMAGE_SIZE` is not set. The camera stream itself is still read at
+native resolution; choose a camera/NVR main-stream URL if the source needs more
+pixels.
 
 The dashboard's machine settings are stored in its SQLite database and sent
 to the backend when monitoring starts. The zone occupancy delay defaults to
@@ -406,15 +414,21 @@ violation clears (about 09:05).
 - A `PERSON_ABSENCE_INTERVAL` event is recorded if the person is matched back
   to the zone after the configured absence period. The five-minute setting
   does not itself activate the over-limit violation.
-- Phone detection runs on person crops at the configured frame interval.
-  A phone detected inside a work zone creates a `PHONE_DETECTED` event.
-- Head-down posture is estimated from pose keypoints inside work zones. If the
-  posture remains detected for `HEAD_DOWN_VIOLATION_SECONDS` (120 seconds by
-  default), one `HEAD_DOWN_VIOLATION` event is added to that camera's
-  `events.csv` and an annotated screenshot is saved. The timer resets when the
-  posture is no longer detected or the person leaves the zone.
-- Violation and phone/absence event screenshots are saved with the event
-  data. A violation interval is recorded when the over-limit condition
+- Phone detection runs on person crops at the configured processed-frame
+  interval. Its latest positive result is reused only until the next scheduled
+  check; phone-only detections do not create violation events.
+- Head-down posture is estimated from nose, eyes, ears, shoulders, and hips in
+  the tracked pose. A violation is recorded only while a person inside a work
+  zone is simultaneously head-down and has a detected phone continuously for
+  `HEAD_DOWN_VIOLATION_SECONDS` (300 seconds by default). One
+  `HEAD_DOWN_PHONE_VIOLATION` event is added to that camera's `events.csv` and
+  an annotated screenshot is saved. The live camera view
+  displays the tracked pose skeleton and head-down timer on the same processed
+  frame as the detection; violation screenshots also include the pose skeleton.
+  The timer resets when either condition is no longer detected or the person
+  leaves the zone.
+- Violation and absence event screenshots are saved with the event data. A
+  violation interval is recorded when the over-limit condition
   clears; the dashboard can show the active violation's start time while it
   is ongoing.
 - The computer's local wall clock is used for event timestamps. The CCTV

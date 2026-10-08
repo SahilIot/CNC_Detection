@@ -3,8 +3,48 @@ from events.event_manager import format_timestamp # function that converts secon
 from zones.zone_manager import ZoneManager # Zone management class 
 
 class Renderer:
+    POSE_CONNECTIONS = (
+        (0, 1), (0, 2), (1, 3), (2, 4),
+        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+        (5, 11), (6, 12), (11, 12),
+        (11, 13), (13, 15), (12, 14), (14, 16),
+    )
+
     def __init__(self, display_width):  
         self.display_width = display_width
+
+    @staticmethod
+    def draw_pose(frame, keypoints, confidence_threshold=0.25):
+        if not keypoints:
+            return frame
+
+        overlay = frame.copy()
+        visible = {
+            index: (int(round(point[0])), int(round(point[1])))
+            for index, point in enumerate(keypoints)
+            if point[2] >= confidence_threshold
+        }
+        for first, second in Renderer.POSE_CONNECTIONS:
+            if first in visible and second in visible:
+                cv2.line(
+                    overlay,
+                    visible[first],
+                    visible[second],
+                    (105, 195, 100),
+                    2,
+                    cv2.LINE_AA,
+                )
+        for point in visible.values():
+            cv2.circle(
+                overlay,
+                point,
+                3,
+                (205, 145, 185),
+                -1,
+                cv2.LINE_AA,
+            )
+        cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, dst=frame)
+        return frame
 
     def render(self,frame,camera_id, video_time,zones,persons,inside,safety,processing_fps,is_live=False,): # creating monitoring display
 
@@ -44,6 +84,10 @@ class Renderer:
 
         frame = ZoneManager.draw(frame, zones)
         for person in persons:
+            self.draw_pose(
+                frame,
+                person.get("pose_keypoints"),
+            )
             x1 = person["x1"]
             y1 = person["y1"]
             x2 = person["x2"]
@@ -59,17 +103,32 @@ class Renderer:
             )
 
             if person.get("locked", False):
-                color = (0, 0, 255) if person.get("head_down") else (0, 255, 0)
+                color = (55, 70, 220) if person.get("head_down") else (65, 205, 65)
                 label = f"PERSON {person_key} | ID {track_id} | {status}"
             else:
-                color = ((0, 255, 0)
+                color = ((65, 205, 65)
                     if zone is not None
-                    else (0, 165, 255)
+                    else (55, 145, 205)
                 )
 
                 label = f"ID {track_id} | {status}"
-            if person.get("head_down"):
-                label += (f" | HEAD DOWN {person.get('head_down_elapsed', 0.0):.0f}s")
+            if person.get("head_down") and person.get("phone_detected"):
+                label += (
+                    f" | PHONE + HEAD DOWN "
+                    f"{person.get('head_down_elapsed', 0.0):.0f}s"
+                )
+            elif person.get("head_down"):
+                label += " | HEAD DOWN"
+            elif person.get("phone_detected"):
+                label += " | PHONE"
+            for phone_box in person.get("phone_boxes", []):
+                cv2.rectangle(
+                    frame,
+                    (phone_box["x1"], phone_box["y1"]),
+                    (phone_box["x2"], phone_box["y2"]),
+                    (0, 0, 255),
+                    2,
+                )
             # Bounding box
             cv2.rectangle(frame,
                 (x1, y1),(x2, y2),
