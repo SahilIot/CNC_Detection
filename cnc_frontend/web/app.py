@@ -1,3 +1,5 @@
+import re
+from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -8,6 +10,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from database.db import (init_db, list_machines, get_machine, create_machine, set_active,
     update_machine_settings, recent_events, add_event,
@@ -21,6 +25,77 @@ app = FastAPI(title="CNC Monitoring Dashboard")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 manager = MonitoringManager()
+
+def machine_names_by_camera(machines):
+    return {
+        f"camera_{int(machine['id']):02d}": machine["name"]
+        for machine in machines
+    }
+
+def add_machine_names_to_events(events, machine_names):
+    for event in events:
+        event["machine_name"] = machine_names.get(
+            event.get("camera_id"),
+            "Unregistered machine",
+        )
+    return events
+
+def excel_text(value):
+    text = "" if value is None else str(value)
+    if text.startswith(("=", "+", "-", "@")):
+        return f"'{text}"
+    return text
+
+def create_events_workbook(events):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Events"
+    headers = [
+        "Time",
+        "Machine",
+        "Event",
+        "Video time (seconds)",
+        "Track IDs",
+        "Details",
+        "Screenshot",
+    ]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1F4E78")
+        cell.alignment = Alignment(vertical="top")
+
+    for event in events:
+        sheet.append([
+            excel_text(event.get("timestamp", "")),
+            excel_text(event.get("machine_name", "Unregistered machine")),
+            excel_text(event.get("event_type", "")),
+            event.get("video_time", 0),
+            excel_text(event.get("track_ids", "")),
+            excel_text(event.get("details", "")),
+            excel_text(event.get("screenshot_url") or ""),
+        ])
+
+    widths = (24, 28, 32, 22, 18, 72, 64)
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[
+            sheet.cell(row=1, column=index).column_letter
+        ].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return output
+
+def events_download_filename(machine_name=None):
+    if not machine_name:
+        return "cnc-events.xlsx"
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "-", machine_name).strip("-")
+    return f"{safe_name or 'machine'}-events.xlsx"
 
 def camera_host(rtsp_url: str):
     from urllib.parse import urlsplit
@@ -64,6 +139,7 @@ def dashboard(request: Request):
         events = manager.events()
     except RuntimeError as exc:
         raise HTTPException(502, f"CNC backend events unavailable: {exc}") from exc
+    add_machine_names_to_events(events, machine_names_by_camera(machines))
     events_by_camera = {}
     for event in events:
         events_by_camera.setdefault(event["camera_id"], []).append(event)
@@ -94,10 +170,16 @@ def machine_preview_page(request: Request, machine_id: int):
         events = manager.events()
     except RuntimeError as exc:
         raise HTTPException(502, f"CNC backend events unavailable: {exc}") from exc
+    camera_id = f"camera_{int(machine['id']):02d}"
+    machine_events = [
+        event for event in events
+        if event.get("camera_id") == camera_id
+    ]
+    add_machine_names_to_events(machine_events, machine_names_by_camera(list_machines()))
     return templates.TemplateResponse(
         request=request,
         name="machine_preview.html",
-        context={"machine": machine, "events": events},
+        context={"machine": machine, "events": machine_events},
     )
 
 @app.post("/machines")
@@ -203,6 +285,43 @@ def machine_zones(machine_id: int):
             502, f"CNC backend saved zones unavailable: {exc}"
         ) from exc
 
+@app.post("/machines/{machine_id}/zones")
+async def save_machine_zones(machine_id: int, request: Request):
+    machine = get_machine(machine_id)
+    if not machine:
+        raise HTTPException(404, "Machine not found")
+
+    payload = await request.json()
+    zones = payload.get("zones") if isinstance(payload, dict) else None
+    if not isinstance(zones, list) or not 1 <= len(zones) <= 20:
+        raise HTTPException(400, "Number of zones must be between 1 and 20")
+    try:
+        manager.save_zones(machine_id, zones)
+        runtime = manager.status(machine_id)
+        zone_limits = machine.get("zone_limits", {})
+        zone_limits = {
+            f"zone_{index}": max(0, min(50, int(
+                zone_limits.get(f"zone_{index}", machine["max_persons"])
+            )))
+            for index in range(1, len(zones) + 1)
+        }
+        update_machine_settings(
+            machine_id,
+            machine["max_persons"],
+            machine["multiple_limit_seconds"],
+            machine["absence_limit_seconds"],
+            zone_limits,
+        )
+        machine["zone_limits"] = zone_limits
+        if runtime.get("running"):
+            manager.start_with_zones(machine, zones)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, f"Could not save or apply work zones: {exc}") from exc
+
+    return {"saved": True, "count": len(zones), "running": bool(runtime.get("running"))}
+
 @app.post("/machines/{machine_id}/settings")
 async def update_settings( request: Request,
     machine_id: int,
@@ -296,6 +415,43 @@ def events():
         return manager.events()
     except RuntimeError as exc:
         raise HTTPException(502, f"CNC backend events unavailable: {exc}") from exc
+
+@app.get("/api/events/export.xlsx")
+def export_events(machine_id: int | None = None):
+    machine = get_machine(machine_id) if machine_id is not None else None
+    if machine_id is not None and machine is None:
+        raise HTTPException(404, "Machine not found")
+    try:
+        records = manager.events(limit=10000)
+    except RuntimeError as exc:
+        raise HTTPException(502, f"CNC backend events unavailable: {exc}") from exc
+
+    names = machine_names_by_camera(list_machines())
+    add_machine_names_to_events(records, names)
+    if machine is not None:
+        camera_id = f"camera_{int(machine['id']):02d}"
+        records = [
+            event for event in records
+            if event.get("camera_id") == camera_id
+        ]
+    if not records:
+        raise HTTPException(404, "No events available to export")
+
+    workbook_file = create_events_workbook(records)
+    filename = events_download_filename(
+        machine["name"] if machine is not None else None
+    )
+    return StreamingResponse(
+        workbook_file,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition":
+                f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+        },
+    )
 
 @app.post("/api/events/delete")
 def delete_events(event_ids: list[str] = Form(...)):

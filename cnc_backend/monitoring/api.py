@@ -13,7 +13,7 @@ from fastapi.responses import Response
 import torch # checks for GPU
 
 # web server,API error responses, streaming response, static file hosting, and request validation
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -47,6 +47,9 @@ class StartRequest(BaseModel): # validate incoming JSON (Pydantic)
 
 class EventDeleteRequest(BaseModel):
     event_ids: list[str] = Field(min_length=1)
+
+class ZoneSaveRequest(BaseModel):
+    zones: list[list[list[float]]] = Field(min_length=1, max_length=20)
 
 @app.on_event("shutdown") 
 def shutdown_workers():
@@ -131,8 +134,8 @@ def health():
     return {"status": "ok"}
 
 @app.get("/events")
-def list_events():
-    records = events.list_events()
+def list_events(limit: int = Query(default=100, ge=1, le=10000)):
+    records = events.list_events(limit=limit)
     for record in records:
         screenshot = record.pop("screenshot")
         record["screenshot_url"] = (
@@ -161,11 +164,10 @@ def start_detection(request: StartRequest):
     if request.zones:
         if len(request.zones) > 20:
             raise HTTPException(422, "Number of zones must not exceed 20")
-        if any(
-            len(zone) < 3 or any(len(point) != 2 for point in zone)
-            for zone in request.zones
-        ):
-            raise HTTPException(422, "Each zone must contain at least three points")
+        try:
+            zones.validate_normalized(request.zones)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     with workers_lock:
         camera_lock = camera_start_locks.setdefault(
@@ -288,6 +290,14 @@ def detection_zones(camera_id: str):
             status_code=500,
             detail=f"Could not read saved zones:{exc}",
         ) 
+
+@app.post("/detection/{camera_id}/zones")
+def save_detection_zones(camera_id: str, request: ZoneSaveRequest):
+    try:
+        zones.save_normalized(camera_id, request.zones)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"saved": True, "count": len(request.zones)}
 
 @app.get("/detection/{camera_id}/stream")
 async def detection_stream(camera_id: str, request: Request):

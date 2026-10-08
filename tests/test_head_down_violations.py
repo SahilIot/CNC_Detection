@@ -126,8 +126,9 @@ class HeadDownPostureTests(unittest.TestCase):
         worker = CameraWorker.__new__(CameraWorker)
         worker.camera_id = "camera_test"
         worker.zone_manager = SimpleNamespace(
-            person_zone=lambda masks, x1, y1, x2, y2: 0,
+            person_zone=lambda zones, x1, y1, x2, y2, margin_px: 0,
         )
+        worker.zones = []
         worker.zone_masks = None
         worker.pose_detector = PoseDetector
         worker.config = SimpleNamespace(
@@ -135,6 +136,7 @@ class HeadDownPostureTests(unittest.TestCase):
             head_pose_keypoint_delta=0.05,
             head_pose_hold_seconds=1.5,
             track_grace_seconds=1.5,
+            zone_margin_px=60,
         )
         worker.head_down_states = {}
         result = SimpleNamespace(
@@ -175,6 +177,7 @@ class HeadDownPostureTests(unittest.TestCase):
             "x2": 110,
             "y2": 210,
             "zone": 0,
+            "head_down": True,
         }
 
         worker._check_phones(None, [person], 0.0, 1)
@@ -194,6 +197,35 @@ class HeadDownPostureTests(unittest.TestCase):
         person["zone"] = None
         worker._check_phones(None, [person], 0.4, 5)
         self.assertFalse(person["phone_detected"])
+        self.assertNotIn(1, worker.phone_states)
+
+    def test_phone_detection_is_not_run_without_head_down_posture(self):
+        class FakePhoneDetector:
+            def detect_in_person(self, *args):
+                raise AssertionError("Phone-only detection should not run")
+
+        worker = CameraWorker.__new__(CameraWorker)
+        worker.config = SimpleNamespace(
+            phone_detection_interval=3,
+            track_grace_seconds=1.5,
+        )
+        worker.phone_detector = FakePhoneDetector()
+        worker.phone_states = {}
+        worker.processed_sequence = 0
+        person = {
+            "id": 1,
+            "x1": 10,
+            "y1": 10,
+            "x2": 110,
+            "y2": 210,
+            "zone": 0,
+            "head_down": False,
+        }
+
+        worker._check_phones(None, [person], 0.0, 1)
+
+        self.assertFalse(person["phone_detected"])
+        self.assertEqual(person["phone_boxes"], [])
         self.assertNotIn(1, worker.phone_states)
 
     def test_display_uses_the_frame_that_was_processed(self):

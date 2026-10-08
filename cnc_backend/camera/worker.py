@@ -154,7 +154,14 @@ class CameraWorker(threading.Thread):
                 "id": int(track_id),
                 "x1": x1,"y1": y1,
                 "x2": x2,"y2": y2,
-                "zone": self.zone_manager.person_zone(self.zone_masks, x1, y1, x2, y2),
+                "zone": self.zone_manager.person_zone(
+                    self.zones,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    self.config.zone_margin_px,
+                ),
                 "confidence": float(confidence),
                 "head_down": (
                     last_head_down
@@ -184,7 +191,7 @@ class CameraWorker(threading.Thread):
             track_id = person["id"]
             zone = person["zone"]
             active_ids.add(track_id)
-            if zone is None:
+            if zone is None or not person.get("head_down", False):
                 self.phone_states.pop(track_id, None)
                 person["phone_boxes"] = []
                 person["phone_detected"] = False

@@ -281,7 +281,14 @@
           <h2>Recent events</h2>
           <p class="panel-sub">Latest violations across all machines.</p>
         </div>
-        <a href="/api/events" class="btn btn-ghost btn-sm">JSON</a>
+        <div class="topbar-actions">
+          {% if events %}
+          <a href="/api/events/export.xlsx" class="btn btn-ghost btn-sm">Download Excel</a>
+          {% else %}
+          <button type="button" class="btn btn-ghost btn-sm" disabled title="No events to export">Download Excel</button>
+          {% endif %}
+          <a href="/api/events" class="btn btn-ghost btn-sm">JSON</a>
+        </div>
       </div>
 
       {% if events %}
@@ -325,7 +332,7 @@
                      data-event-checkbox="all-events">
             </td>
             <td>{{ event.timestamp }}</td>
-            <td>{{ event.camera_id }}</td>
+            <td>{{ event.machine_name }}</td>
             <td><span class="tag">{{ event.event_type }}</span></td>
             <td>
               {{ event.details }}

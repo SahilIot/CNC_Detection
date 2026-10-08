@@ -117,7 +117,7 @@
             class="secondary"
             data-zone-editor
             data-preview-url="/machines/{{ machine.id }}/preview"
-            data-action="/machines/{{ machine.id }}/start-monitoring"
+            data-action="/machines/{{ machine.id }}/zones"
             data-zones-url="/machines/{{ machine.id }}/zones"
             data-zone-count="{{ machine.runtime.zones|length or machine.zone_limits|length or 1 }}"
           >
@@ -255,7 +255,14 @@
           <h2>Events and violation periods</h2>
           <p class="panel-sub">History for this machine only.</p>
         </div>
+      <div class="topbar-actions">
+        {% if events %}
+        <a href="/api/events/export.xlsx?machine_id={{ machine.id }}" class="btn btn-ghost btn-sm">Download Excel</a>
+        {% else %}
+        <button type="button" class="btn btn-ghost btn-sm" disabled title="No events to export">Download Excel</button>
+        {% endif %}
         <a href="/api/events" class="btn btn-ghost btn-sm">JSON</a>
+      </div>
       </div>
 
       <form
@@ -287,6 +294,7 @@
             <tr>
               <th>Select</th>
               <th>Time</th>
+              <th>Machine</th>
               <th>Event</th>
               <th>Details</th>
               <th>Screenshot</th>
@@ -308,6 +316,7 @@
               </td>
 
               <td>{{ event.timestamp }}</td>
+              <td>{{ machine.name }}</td>
               <td><span class="tag">{{ event.event_type }}</span></td>
               <td>{{ event.details }}</td>
 
@@ -323,7 +332,7 @@
             </tr>
             {% endif %}
             {% else %}
-            <tr><td colspan="5" class="muted">No events yet.</td></tr>
+            <tr><td colspan="6" class="muted">No events yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -336,10 +345,10 @@
       <div>
         <h2>Update machine zones</h2>
         <p class="hint">
-          Saved zones appear in cyan as a reference. Trace each replacement
-          zone by holding the mouse button and moving around its boundary.
-          Release the mouse, then click Finish zone. Completed replacement
-          zones appear in green. Saving replaces the old layout.
+          Existing zones appear in cyan as a reference. Click Draw replacement
+          zone, then hold the mouse button and trace any shape on the preview.
+          Release the mouse, then click Finish zone. Completed zones appear in green.
+          Saving replaces the old layout without starting a stopped camera.
         </p>
       </div>
       <button type="button" class="dialog-close" onclick="this.closest('dialog').close()" aria-label="Close">&times;</button>
@@ -362,11 +371,11 @@
           <img id="zone-preview" alt="Camera preview">
           <canvas id="zone-canvas" aria-label="Draw a freehand work-zone"></canvas>
         </div>
-
-        <button type="button" id="draw-zone" class="draw-zone-button">
-          Draw replacement zone 1
-        </button>
       </div>
+
+      <button type="button" id="draw-zone" class="draw-zone-button">
+        Draw replacement zone 1
+      </button>
 
       <p id="zone-progress" class="hint"></p>
     </div>
@@ -610,7 +619,7 @@
           );
         });
 
-        // Current trace: yellow.
+        // Current freehand trace: yellow.
         if (points.length > 0) {
           drawPolygon(
             points,
@@ -739,7 +748,6 @@
         enabled = false;
         activePointerId = null;
         points = [];
-        drawButton.style.display = "block";
         drawButton.classList.remove("active");
         redraw();
       });
@@ -750,7 +758,6 @@
           enabled = false;
           activePointerId = null;
           points = [];
-          drawButton.style.display = "block";
           drawButton.classList.remove("active");
           redraw();
         }
@@ -764,8 +771,8 @@
         drawing = false;
         activePointerId = null;
 
-        drawButton.style.display = "none";
         drawButton.classList.add("active");
+        drawButton.textContent = "Drawing enabled — trace on preview";
 
         redraw();
       });
@@ -800,6 +807,8 @@
 
         drawButton.style.display = "block";
         drawButton.classList.remove("active");
+        drawButton.textContent =
+          `Draw replacement zone ${zones.length + 1}`;
 
         redraw();
       });
@@ -893,12 +902,9 @@
 
             const zonesData = await zonesResponse.json();
 
-            if (
-              !Array.isArray(zonesData.zones) ||
-              zonesData.zones.length === 0
-            ) {
+            if (!Array.isArray(zonesData.zones)) {
               throw new Error(
-                "No saved zones were returned by the zones endpoint."
+                "The zones endpoint did not return a zone list."
               );
             }
 
@@ -926,7 +932,9 @@
               zone.map(point => [...point])
             );
 
-            zoneCountInput.value = savedZones.length;
+            zoneCountInput.value =
+              savedZones.length || Number(editor.dataset.zoneCount) || 1;
+            drawButton.textContent = "Draw replacement zone 1";
           } catch (error) {
             console.error("Could not load saved zones:", error);
 

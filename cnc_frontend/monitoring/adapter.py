@@ -185,8 +185,15 @@ class MonitoringManager:
     def zones_status(self, machine_id: int):
         return self._request("GET", f"/detection/{self._camera_id(machine_id)}/zones")
 
-    def events(self):
-        return self._request("GET", "/events")
+    def save_zones(self, machine_id: int, zones):
+        return self._request(
+            "POST",
+            f"/detection/{self._camera_id(machine_id)}/zones",
+            {"zones": zones},
+        )
+
+    def events(self, limit=100):
+        return self._request("GET", f"/events?limit={int(limit)}")
 
     def delete_event(self, event_id):
         return self._request("DELETE", f"/events/{event_id}")

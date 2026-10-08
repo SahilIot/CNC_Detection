@@ -112,23 +112,25 @@ class Renderer:
                 )
 
                 label = f"ID {track_id} | {status}"
-            if person.get("head_down") and person.get("phone_detected"):
+            phone_and_head_down = (
+                person.get("head_down") and person.get("phone_detected")
+            )
+            if phone_and_head_down:
                 label += (
                     f" | PHONE + HEAD DOWN "
                     f"{person.get('head_down_elapsed', 0.0):.0f}s"
                 )
             elif person.get("head_down"):
                 label += " | HEAD DOWN"
-            elif person.get("phone_detected"):
-                label += " | PHONE"
-            for phone_box in person.get("phone_boxes", []):
-                cv2.rectangle(
-                    frame,
-                    (phone_box["x1"], phone_box["y1"]),
-                    (phone_box["x2"], phone_box["y2"]),
-                    (0, 0, 255),
-                    2,
-                )
+            if phone_and_head_down:
+                for phone_box in person.get("phone_boxes", []):
+                    cv2.rectangle(
+                        frame,
+                        (phone_box["x1"], phone_box["y1"]),
+                        (phone_box["x2"], phone_box["y2"]),
+                        (0, 0, 255),
+                        2,
+                    )
             # Bounding box
             cv2.rectangle(frame,
                 (x1, y1),(x2, y2),

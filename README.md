@@ -354,10 +354,11 @@ read model files and write to the database/output directories.
 1. Open the dashboard and choose **Add Machine**.
 2. Enter a machine name, RTSP URL, zone count, per-zone allowed-person
    limits, and timing settings.
-3. Save the machine. Click **Start** for its row.
+3. Save the machine.
 4. In the zone editor, draw each work area on the camera preview and click
-   **Finish zone** for each polygon. Draw the configured number of zones and
-   choose **Start monitoring**.
+   **Finish zone** for each polygon. Click **Save zones**; this saves the
+   polygons without starting a stopped camera. Click **Start** when ready to
+   begin monitoring.
 5. Use the machine card's settings form to adjust each zone's allowed-person
    count or the per-machine event/absence delays. **Update settings** restarts
    a running monitor with the new configuration.
@@ -398,9 +399,10 @@ violation clears (about 09:05).
 ## Detection and safety behavior
 
 - Person detection uses an Ultralytics YOLO model and persistent tracking.
-- The worker assigns a person to a zone using the bottom-center point of the
-  person's bounding box (an estimate of foot position), not general box
-  overlap.
+- The worker assigns a person to the closest zone using the bottom-center
+  point of the person's bounding box (an estimate of foot position), not
+  general box overlap. The configured 60-pixel boundary tolerance helps
+  absorb small bounding-box shifts at zone edges.
 - Duplicate detections are suppressed before zone counts are calculated.
 - Track changes can be matched to existing physical-person locks to reduce
   double counting.
@@ -477,6 +479,7 @@ The dashboard serves HTML pages and proxies selected backend resources:
 | `POST` | `/machines/{machine_id}/start-monitoring` | Start monitoring and save submitted zones |
 | `GET` | `/machines/{machine_id}/preview` | Fetch a one-frame camera preview |
 | `GET` | `/machines/{machine_id}/zones` | Check whether saved zones exist |
+| `POST` | `/machines/{machine_id}/zones` | Save polygons; apply them immediately if monitoring is running |
 | `POST` | `/machines/{machine_id}/settings` | Update machine settings |
 | `POST` | `/machines/{machine_id}/stop` | Stop monitoring |
 | `POST` | `/machines/{machine_id}/delete` | Delete machine and backend outputs |
@@ -485,6 +488,7 @@ The dashboard serves HTML pages and proxies selected backend resources:
 | `GET` | `/backend/detection/{camera_id}/stream` | Proxied MJPEG stream |
 | `GET` | `/backend/outputs/{file_path}` | Proxied screenshot/output |
 | `GET` | `/api/events` | Recent events |
+| `GET` | `/api/events/export.xlsx` | Download events as an Excel workbook; accepts optional `machine_id` to export one machine |
 | `POST` | `/api/events/delete` | Delete selected events |
 | `POST` | `/api/events/{event_id}/delete` | Delete an event |
 
@@ -501,6 +505,7 @@ The backend listens on port `9000` by default:
 | `DELETE` | `/detection/{camera_id}` | Stop a worker and delete that camera's output directory |
 | `GET` | `/detection/{camera_id}/status` | Running state and zone occupancy |
 | `GET` | `/detection/{camera_id}/zones` | Saved zone status |
+| `POST` | `/detection/{camera_id}/zones` | Validate and save normalized zone polygons |
 | `GET` | `/detection/{camera_id}/stream` | Annotated MJPEG stream |
 | `GET` | `/events` | List event records |
 | `POST` | `/events/delete` | Delete selected event IDs |

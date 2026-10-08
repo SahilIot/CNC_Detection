@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 import cv2
 import numpy as np
@@ -24,16 +25,23 @@ class ZoneManager:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            zones = []
-            for normalized in data.get("zones", []):
-                if len(normalized) >= 3:
-                    zones.append(np.array([[int(x * width), int(y * height)] for x, y in normalized], dtype=np.int32))
-            return zones or None
+            normalized_zones = data.get("zones", [])
+            if not normalized_zones:
+                return None
+            self.validate_normalized(normalized_zones)
+            return [
+                np.array(
+                    [[int(x * width), int(y * height)] for x, y in zone],
+                    dtype=np.int32,
+                )
+                for zone in normalized_zones
+            ]
         except Exception as exc:
             print(f"Could not load zones for {camera_id}:", exc)
             return None
 
     def save_normalized(self, camera_id, zones):
+        self.validate_normalized(zones)
         path = self.file_path(camera_id)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(
@@ -41,6 +49,36 @@ class ZoneManager:
                 f,
                 indent=4,
             )
+
+    @staticmethod
+    def validate_normalized(zones):
+        if not isinstance(zones, list) or not 1 <= len(zones) <= 20:
+            raise ValueError("Number of zones must be between 1 and 20")
+        for index, zone in enumerate(zones, start=1):
+            if not isinstance(zone, list) or len(zone) < 3:
+                raise ValueError(
+                    f"Zone {index} must contain at least three points"
+                )
+            for point in zone:
+                if (
+                    not isinstance(point, (list, tuple))
+                    or len(point) != 2
+                    or any(
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value)
+                        or value < 0
+                        or value > 1
+                        for value in point
+                    )
+                ):
+                    raise ValueError(
+                        f"Zone {index} coordinates must be normalized "
+                        "finite values between 0 and 1"
+                    )
+            polygon = np.asarray(zone, dtype=np.float32).reshape(-1, 1, 2)
+            if abs(cv2.contourArea(polygon)) <= 1e-8:
+                raise ValueError(f"Zone {index} must have a non-zero area")
 
     def masks(self, zones, width, height):
         result = []
@@ -59,16 +97,26 @@ class ZoneManager:
             return False
         return mask[y, x] > 0
 
-    @classmethod
-    def person_zone(cls, masks, x1, y1, x2, y2):
+    @staticmethod
+    def person_zone(zones, x1, y1, x2, y2, margin_px=0):
         # The bottom-center point approximates where the person's feet touch
         # the floor. A person's upper body can overlap a zone while they are
         # standing outside it, so bounding-box overlap is not occupancy.
-        foot_x = (x1 + x2) / 2
-        foot_y = y2
-        for index, mask in enumerate(masks):
-            if cls.point_inside(mask, foot_x, foot_y):
-                return index
+        # Pick the closest polygon when zones overlap or the footpoint is
+        # slightly outside a boundary due to box/keypoint jitter.
+        footpoint = ((x1 + x2) / 2, y2)
+        closest_zone = None
+        closest_distance = -float("inf")
+        for index, zone in enumerate(zones or []):
+            polygon = np.asarray(zone, dtype=np.int32).reshape(-1, 1, 2)
+            distance = cv2.pointPolygonTest(
+                polygon, footpoint, measureDist=True
+            )
+            if distance > closest_distance:
+                closest_distance = distance
+                closest_zone = index
+        if closest_distance >= -max(0, margin_px):
+            return closest_zone
         return None
 
     @staticmethod
