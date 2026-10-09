@@ -38,6 +38,7 @@ LAN while the backend remains bound to localhost.
 - [Project layout](#project-layout)
 - [Requirements](#requirements)
 - [Install on Windows](#install-on-windows)
+- [Run with Docker](#run-with-docker)
 - [Configure the backend](#configure-the-backend)
 - [Connect cameras or an NVR](#connect-cameras-or-an-nvr)
 - [Run locally](#run-locally)
@@ -117,6 +118,76 @@ Set-Location C:\Users\Sahil\Downloads\CNC_Detection
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
+
+## Run with Docker
+
+Docker Compose runs the dashboard and detection backend as separate
+containers built from the same image. Install Docker Desktop (Windows or
+macOS) or Docker Engine with the Compose plugin (Linux), then open a terminal
+in the project root.
+
+The YOLO weights are not included in the image or repository. Before starting
+monitoring, place the weights in `cnc_backend\models\`:
+
+```text
+cnc_backend\models\yolo11l.pt
+cnc_backend\models\yolo12n.pt
+cnc_backend\models\yolo11n-pose.pt
+```
+
+These are the default person, phone, and pose model paths. The backend
+container reads configuration from the project-root `.env` and
+`cnc_backend\.env` files (the backend-specific file takes precedence), just
+as it does when run locally. If using different filenames, set `MODEL_PATH`,
+`PHONE_MODEL_PATH`, and `HEAD_POSE_MODEL_PATH` in one of those local files to
+their paths inside the container, for example:
+
+```dotenv
+MODEL_PATH=/app/cnc_backend/models/person.pt
+PHONE_MODEL_PATH=/app/cnc_backend/models/phone.pt
+HEAD_POSE_MODEL_PATH=/app/cnc_backend/models/pose.pt
+```
+
+Keep model files and `.env` files private; they are excluded from the image
+build context.
+
+Build the image and start both services:
+
+```powershell
+docker compose up --build -d
+```
+
+Open <http://localhost:8000>. The dashboard reaches the backend using the
+internal Compose address `http://backend:9000`; the backend API is published
+only on `127.0.0.1:9000` on the host. The dashboard is published on port
+`8000` on all host interfaces, so restrict LAN access with the host firewall
+when needed.
+
+Useful commands:
+
+```powershell
+docker compose logs -f
+docker compose stop
+docker compose up -d
+docker compose down
+```
+
+The `frontend-data` named volume preserves the dashboard's SQLite database,
+including saved machine settings and camera credentials. The
+`cnc_backend\data\outputs` bind mount preserves zones, event CSV files, and
+screenshots in the project directory. Back up both before moving or removing
+the deployment. `docker compose down -v` also removes the database volume and
+should only be used when you intend to delete that saved data.
+
+To deploy to another device, install Docker there and transfer the project
+files, the required model weights, and any local `.env` configuration; then
+run the same Compose command. Alternatively, publish the built
+`cnc-detection:latest` image to a registry or transfer it with `docker save`
+and `docker load`. The target still needs the Compose file, model weights,
+and persistent data storage. Images must match the target's CPU architecture;
+Docker alone does not provide GPU acceleration, and this deployment uses CPU
+inference unless GPU support is separately configured. The container host
+must also be able to reach the configured camera/NVR RTSP streams.
 
 There may also be a separate `cnc_frontend\.venv` in a developer checkout.
 Do not mix environments: each service must be run using a Python environment

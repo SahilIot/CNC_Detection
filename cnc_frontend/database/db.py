@@ -1,9 +1,13 @@
 import sqlite3
 import json
+import os
 from pathlib import Path
 from contextlib import contextmanager
 
-DB_PATH = Path(__file__).resolve().parent / "cnc.sqlite3"
+DB_PATH = Path(
+    os.getenv("CNC_DATABASE_PATH", str(Path(__file__).resolve().parent / "cnc.sqlite3"))
+).expanduser()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 @contextmanager
 def connection():
